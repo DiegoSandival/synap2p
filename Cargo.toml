@@ -1,0 +1,30 @@
+[package]
+name = "synap2p"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Tokio para la asincronía y canales
+tokio = { version = "1.32", features = ["full"] }
+
+# Libp2p con todas las features que usamos en behaviour.rs
+libp2p = { version = "0.53", features = [
+    "macros",
+    "tokio",
+    "tcp",
+    "quic",
+    "noise",
+    "yamux",
+    "gossipsub",
+    "kad",
+    "request-response",
+    "cbor",
+    "identify",
+    "ping",
+    "relay",
+    "autonat",
+    "dcutr"
+] }
+
+# Serialización para los mensajes directos (Request-Response)
+serde = { version = "1.0", features = ["derive"] }
