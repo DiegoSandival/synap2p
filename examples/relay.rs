@@ -7,11 +7,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter("synap2p=warn") // Ocultamos los logs internos para ver la consola limpia
         .init();
 
+    let mut args = std::env::args().skip(1);
+    
+    // Leemos un argumento opcional para el nombre del relay. 
+    // Si no pones nada, por defecto se llamará "relay_principal".
+    let nombre_relay = args.next().unwrap_or_else(|| "relay_principal".to_string());
+
     let mut config = NodeConfig::default();
     config.role = NodeRole::RelayServer;
     config.listen_port = 4001; 
     config.identity_path = PathBuf::from("./relay_identity.key");
 
+    // Usamos el nombre dinámico para el archivo de la llave
+    config.identity_path = PathBuf::from(format!("./{}_identity.key", nombre_relay));
+    
     println!("Iniciando Servidor Relay...");
     let (client, mut event_rx) = NodeClient::start(config).await?;
 

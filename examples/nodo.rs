@@ -7,12 +7,16 @@ use tokio::io::{self, AsyncBufReadExt, BufReader};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Solo mostrar advertencias y errores por defecto para no ensuciar el chat
     tracing_subscriber::fmt()
-        .with_env_filter("synap2p=warn") 
+        .with_env_filter("synap2p=debug") 
         .init();
 
     let mut args = std::env::args().skip(1);
-    let relay_peer_str = args.next().expect("Uso: cargo run --example nodo <RELAY_PEER_ID> <RELAY_MULTIADDR>");
+    let relay_peer_str = args.next().expect("Uso: cargo run --example nodo <RELAY_PEER_ID> <RELAY_MULTIADDR> [NOMBRE_NODO]");
     let relay_addr_str = args.next().expect("Falta la Multiaddr del Relay");
+    
+    // NUEVO: Leemos un tercer argumento opcional para el nombre del nodo. 
+    // Si no lo pones, usa un ID aleatorio como antes.
+    let nombre_nodo = args.next().unwrap_or_else(|| format!("cliente_{}", std::process::id()));
 
     let relay_peer_id = PeerId::from_str(&relay_peer_str)?;
     let relay_addr = Multiaddr::from_str(&relay_addr_str)?;
@@ -20,8 +24,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = NodeConfig::default();
     config.role = NodeRole::Client;
     config.listen_port = 0;
-    config.identity_path = PathBuf::from(format!("./cliente_{}_identity.key", std::process::id()));
-
+    
+    // Usamos el nombre que le pasamos por consola
+    config.identity_path = PathBuf::from(format!("./{}_identity.key", nombre_nodo));
     let (client, mut event_rx) = NodeClient::start(config).await?;
     
     // Obtenemos nuestro propio PeerId para mostrarlo
@@ -78,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Err(e) = client_clone.connect_to_node(target_peer_id, dial_addr).await {
                                 eprintln!("⚠️ Error al conectar: {:?}", e);
                             } else {
-                                println!("✅ ¡Conectado al nodo exitosamente!");
+                                //println!("✅ ¡Conectado al nodo exitosamente!");
                             }
                         }
                         Err(_) => eprintln!("⚠️ PeerId inválido."),
@@ -141,6 +146,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             NetworkEvent::FatalError(e) => {
                 eprintln!("❌ Error fatal: {:?}", e);
                 break;
+            }
+
+            NetworkEvent::ConnectionEstablished { peer_id } => {
+                println!("✅ ¡Conexión REAL establecida con {}!", peer_id);
+            }
+            NetworkEvent::ConnectionFailed { peer_id, error } => {
+                eprintln!("❌ Falló la conexión con {}: {}", peer_id, error);
             }
             _ => {} 
         }

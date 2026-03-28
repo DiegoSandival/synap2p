@@ -27,6 +27,10 @@ pub enum NetworkEvent {
         key: String,
         providers: Vec<PeerId>,
     },
+    /// Se estableció una conexión real con un Peer.
+    ConnectionEstablished { peer_id: PeerId },
+    /// Falló un intento de conexión saliente.
+    ConnectionFailed { peer_id: PeerId, error: String },
     /// Un error crítico que detuvo el Event Loop.
     FatalError(P2pError),
 }

@@ -145,7 +145,23 @@ impl EventLoop {
                 
                 let _ = self.event_sender.send(NetworkEvent::NewListenAddr(address)).await;
             }
+
+            SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                tracing::info!("Conexión establecida con {} ({:?})", peer_id, endpoint);
+                let _ = self.event_sender.send(NetworkEvent::ConnectionEstablished { peer_id }).await;
+            }
+            SwarmEvent::OutgoingConnectionError { peer_id: Some(peer_id), error, .. } => {
+                tracing::error!("Error al conectar con {}: {:?}", peer_id, error);
+                let _ = self.event_sender.send(NetworkEvent::ConnectionFailed { 
+                    peer_id, 
+                    error: error.to_string() 
+                }).await;
+            }
             
+          SwarmEvent::Behaviour(CustomBehaviourEvent::RelayClient(event)) => {
+                tracing::info!("📡 Evento del Relay Client: {:?}", event);
+            }
+
             SwarmEvent::Behaviour(CustomBehaviourEvent::Gossipsub(gossipsub::Event::Message { propagation_source, message, message_id })) => {
                 tracing::debug!("Mensaje pubsub recibido: {} desde {}", message_id, propagation_source);
                 let event = NetworkEvent::GossipMessageReceived {
