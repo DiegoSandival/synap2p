@@ -1,0 +1,39 @@
+[package]
+name = "synap2p"
+version = "0.1.0"
+edition = "2024"
+description = "Librería P2P basada en libp2p-quic con soporte Relay y DCUtR"
+
+
+[dependencies]
+# Core de red P2P
+libp2p = { version = "0.53", features = [
+    "quic", 
+    "gossipsub", 
+    "kad", 
+    "request-response", 
+    "relay", 
+    "dcutr", 
+    "identify", 
+    "macros", 
+    "tokio",
+    "noise",
+    "yamux"
+] }
+
+# Runtime asíncrono y canales
+tokio = { version = "1.36", features = ["rt-multi-thread", "macros", "sync", "time", "io-std", "io-util"] }
+futures = "0.3"
+
+# Manejo de errores
+thiserror = "1.0"
+
+# Serialización para nuestro protocolo Request-Response
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logs y observabilidad
+tracing = "0.1"
+async-trait = "0.1.89"
+
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
