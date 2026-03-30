@@ -98,22 +98,7 @@ impl EventLoop {
             NetworkCommand::GetLocalPeerId { responder } => {
                 let _ = responder.send(self.swarm.local_peer_id().clone());
             }
-            NetworkCommand::AnnounceProvider { key, responder } => {
-                let record_key = kad::RecordKey::new(&key);
-                match self.swarm.behaviour_mut().kademlia.start_providing(record_key) {
-                    Ok(query_id) => {
-                        self.pending_kad_routing.insert(query_id, responder);
-                    }
-                    Err(e) => {
-                        let _ = responder.send(Err(P2pError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))));
-                    }
-                }
-            }
-            NetworkCommand::FindProviders { key, responder } => {
-                let record_key = kad::RecordKey::new(&key);
-                let query_id = self.swarm.behaviour_mut().kademlia.get_providers(record_key);
-                self.pending_kad_providers.insert(query_id, responder);
-            }
+    
             NetworkCommand::GetConnectedPeers { responder } => {
                 let peers: Vec<PeerId> = self.swarm.connected_peers().cloned().collect();
                 let _ = responder.send(peers);
@@ -124,11 +109,53 @@ impl EventLoop {
                     .map_err(|e| P2pError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())));
                 let _ = responder.send(result);
             }
+
+            NetworkCommand::AnnounceProvider { key, responder } => {
+                let record_key = kad::RecordKey::new(&key);
+                match self.swarm.behaviour_mut().kademlia.start_providing(record_key) {
+                    Ok(query_id) => {
+                        self.pending_kad_routing.insert(query_id, responder);
+                    }
+                    Err(e) => {
+                        let _ = responder.send(Err(P2pError::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))));
+                    }
+                }
+            }
+            NetworkCommand::FindProviders { key, responder } => {
+                let record_key = kad::RecordKey::new(&key);
+                let query_id = self.swarm.behaviour_mut().kademlia.get_providers(record_key);
+                self.pending_kad_providers.insert(query_id, responder);
+            }
         }
     }
 
     async fn handle_swarm_event(&mut self, event: SwarmEvent<CustomBehaviourEvent>) {
         match event {
+            SwarmEvent::Behaviour(CustomBehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed { id, result, .. })) => {
+                match result {
+                    // Cuando terminamos de anunciar nuestra clave al mundo exitosamente
+                    kad::QueryResult::StartProviding(Ok(_)) => {
+                        if let Some(responder) = self.pending_kad_routing.remove(&id) {
+                            let _ = responder.send(Ok(()));
+                        }
+                    }
+                    // Cuando la búsqueda encuentra a alguien
+                    kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders { providers, .. })) => {
+                        if let Some(responder) = self.pending_kad_providers.remove(&id) {
+                            let _ = responder.send(Ok(providers.into_iter().collect()));
+                        }
+                    }
+                    // Cuando la búsqueda termina y no hay más registros
+                    kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FinishedWithNoAdditionalRecord { .. })) => {
+                        // Si no habíamos encontrado a nadie antes, devolvemos una lista vacía
+                        if let Some(responder) = self.pending_kad_providers.remove(&id) {
+                            let _ = responder.send(Ok(vec![])); 
+                        }
+                    }
+                    _ => {} // Ignoramos errores u otros eventos intermedios para no saturar
+                }
+            }
+
             SwarmEvent::NewListenAddr { address, .. } => {
                 let local_peer_id = self.swarm.local_peer_id().clone();
                 tracing::info!("Nodo escuchando en: {}/p2p/{}", address, local_peer_id);
@@ -148,6 +175,10 @@ impl EventLoop {
 
             SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                 tracing::info!("Conexión establecida con {} ({:?})", peer_id, endpoint);
+
+                // Registramos al nodo en nuestra tabla de ruteo DHT
+                self.swarm.behaviour_mut().kademlia.add_address(&peer_id, endpoint.get_remote_address().clone());
+
                 let _ = self.event_sender.send(NetworkEvent::ConnectionEstablished { peer_id }).await;
             }
             SwarmEvent::OutgoingConnectionError { peer_id: Some(peer_id), error, .. } => {
@@ -191,32 +222,7 @@ impl EventLoop {
                 }
             }
             
-            SwarmEvent::Behaviour(CustomBehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed { id, result, .. })) => {
-                match result {
-                    kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders { providers, .. })) => {
-                        if let Some(responder) = self.pending_kad_providers.remove(&id) {
-                            let _ = responder.send(Ok(providers.into_iter().collect()));
-                        }
-                    }
-                    kad::QueryResult::GetProviders(Err(_)) => {
-                        if let Some(responder) = self.pending_kad_providers.remove(&id) {
-                            let _ = responder.send(Err(P2pError::NoProvidersFound));
-                        }
-                    }
-                    kad::QueryResult::StartProviding(Ok(kad::AddProviderOk { .. })) => {
-                        if let Some(responder) = self.pending_kad_routing.remove(&id) {
-                            let _ = responder.send(Ok(()));
-                        }
-                    }
-                    kad::QueryResult::StartProviding(Err(_e)) => {
-                        if let Some(responder) = self.pending_kad_routing.remove(&id) {
-                            let _ = responder.send(Err(P2pError::Io(std::io::Error::new(std::io::ErrorKind::Other, "Error en Kademlia StartProviding"))));
-                        }
-                    }
-                    _ => {} // Otros eventos Kademlia se ignoran por ahora
-                }
-            }
-
+           
             // Capturar errores fatales si es necesario
             SwarmEvent::ListenerClosed { reason: Err(e), .. } => {
                 tracing::error!("Listener cerrado por error: {:?}", e);

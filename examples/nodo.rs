@@ -50,6 +50,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("- Escribe normalmente y presiona Enter para enviar al chat global.");
     println!("- /connect <PeerId_Destino>   -> Conectarse a otro nodo vía Relay.");
     println!("- /peers                      -> Ver lista de nodos conectados.");
+    println!("- /announce <clave>           -> Anunciar que provees un servicio/archivo.");
+    println!("- /find <clave>               -> Buscar quién provee una clave.");
+    println!("- /sub <tema>                 -> Suscribirse a un nuevo canal.");
+    println!("- /pub <tema> <mensaje...>    -> Enviar mensaje a un canal específico."); 
     println!("- /msg <PeerId> <mensaje...>  -> Enviar mensaje privado (Direct Message).");
     println!("========================\n");
 
@@ -71,6 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if msg.is_empty() {
                 continue;
             }
+
+
             if msg.starts_with("/connect ") {
                 let parts: Vec<&str> = msg.splitn(2, ' ').collect();
                 if parts.len() == 2 {
@@ -102,6 +108,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(e) => eprintln!("⚠️ Error al obtener peers: {:?}", e),
                 }
+            }else if msg.starts_with("/announce ") {
+                let key = msg.replace("/announce ", "");
+                println!("📢 Anunciando clave '{}' en la red DHT...", key);
+                if let Err(e) = client_clone.announce_provider(key).await {
+                    eprintln!("⚠️ Error al anunciar: {:?}", e);
+                } else {
+                    println!("✅ Clave anunciada correctamente. ¡Los demás ya pueden encontrarte!");
+                }
+            } else if msg.starts_with("/find ") {
+                let key = msg.replace("/find ", "");
+                println!("🔍 Buscando proveedores para la clave '{}'...", key);
+                match client_clone.find_providers(key).await {
+                    Ok(providers) => {
+                        if providers.is_empty() {
+                            println!("🤷 No se encontraron nodos para esta clave.");
+                        } else {
+                            println!("🎯 ¡Encontrados! Nodos que tienen esta clave:");
+                            for p in providers {
+                                println!("   - {}", p);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("⚠️ Error en la búsqueda: {:?}", e),
+                }
             } else if msg.starts_with("/msg ") {
                 // Dividir en máximo 3 partes: "/msg", "El_Peer_Id", "El resto del mensaje..."
                 let parts: Vec<&str> = msg.splitn(3, ' ').collect();
@@ -121,7 +151,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     eprintln!("⚠️ Uso correcto: /msg <PeerId> <mensaje>");
                 }
-            } else {
+             } else if msg.starts_with("/sub ") {
+                let topic = msg.replace("/sub ", "");
+                println!("📢 Suscribiéndose al canal '{}'...", topic);
+                if let Err(e) = client_clone.subscribe(topic.clone()).await {
+                    eprintln!("⚠️ Error al suscribirse: {:?}", e);
+                } else {
+                    println!("✅ Suscrito exitosamente a '{}'.", topic);
+                }
+                
+            } else if msg.starts_with("/pub ") {
+                // Separamos en 3 partes: "/pub", "nombre_del_tema", "el resto del mensaje"
+                let parts: Vec<&str> = msg.splitn(3, ' ').collect();
+                if parts.len() == 3 {
+                    let topic = parts[1].to_string();
+                    let text = parts[2].to_string();
+                    
+                    if let Err(e) = client_clone.publish_message(topic.clone(), text.into_bytes()).await {
+                        eprintln!("⚠️ Error al publicar en '{}': {:?}", topic, e);
+                    } else {
+                        // Opcional: Imprimimos nuestro propio mensaje en consola para saber que se envió
+                        println!("🔼 [{} | Yo]: {}", topic, parts[2]);
+                    }
+                } else {
+                    eprintln!("⚠️ Uso incorrecto. Formato: /pub <tema> <mensaje>");
+                }
+            }else {
                 // Mensaje normal, enviar por Gossipsub
                 if let Err(e) = client_clone.publish_message(topic_clone.clone(), msg.as_bytes().to_vec()).await {
                     eprintln!("⚠️ Error al publicar: {:?}", e);
