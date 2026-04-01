@@ -10,6 +10,10 @@ pub enum NodeRole {
     Client,
 }
 
+/// Configuracion publica para arrancar un nodo `synap2p`.
+///
+/// Esta estructura controla identidad, puertos, tamanos de canal y timeout base.
+/// Se puede construir manualmente o partir de [`Default`].
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
     /// Rol de este nodo en la topología de red.
@@ -27,6 +31,16 @@ pub struct NodeConfig {
 }
 
 impl Default for NodeConfig {
+    /// Construye una configuracion razonable para un cliente simple.
+    ///
+    /// Valores por defecto:
+    ///
+    /// - `role = NodeRole::Client`
+    /// - `identity_path = ./peer_id.key`
+    /// - `listen_port = 0`
+    /// - `command_channel_size = 100`
+    /// - `event_channel_size = 100`
+    /// - `timeout = 15s`
     fn default() -> Self {
         Self {
             role: NodeRole::Client,

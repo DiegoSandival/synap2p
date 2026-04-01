@@ -5,6 +5,8 @@ use std::path::Path;
 use crate::error::P2pError;
 
 /// Carga un Keypair desde el disco o genera uno nuevo si no existe.
+///
+/// La clave se serializa usando el formato protobuf de `libp2p`.
 pub fn load_or_generate(path: &Path) -> Result<Keypair, P2pError> {
     if path.exists() {
         // Leer la clave existente

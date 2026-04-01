@@ -22,7 +22,10 @@ pub enum NetworkEvent {
         source: PeerId,
         data: Vec<u8>,
     },
-    /// Kademlia encontró proveedores para una clave específica.
+    /// Kademlia completó una búsqueda de proveedores para una clave específica.
+    ///
+    /// El crate emite este evento al cerrar una query `find_providers`, usando el
+    /// mismo conjunto final de peers que devuelve `NodeClient::find_providers`.
     ProviderFound {
         key: String,
         providers: Vec<PeerId>,

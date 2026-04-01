@@ -2,6 +2,11 @@ use std::io;
 use libp2p::{gossipsub, swarm::DialError};
 use thiserror::Error;
 
+/// Error publico del crate.
+///
+/// Reune los errores inmediatos observables desde la API de `NodeClient`.
+/// Los fallos asincronos o fatales del bucle de red tambien pueden llegar como
+/// [`crate::NetworkEvent::FatalError`].
 #[derive(Debug, Error)]
 pub enum P2pError {
     #[error("Error de entrada/salida (I/O): {0}")]

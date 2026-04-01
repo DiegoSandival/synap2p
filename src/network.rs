@@ -1,4 +1,4 @@
-use std::collections::HashMap; // <- Agregado
+use std::collections::{HashMap, HashSet};
 use libp2p::gossipsub;         // <- Agregado
 use libp2p::kad::{self, QueryId};
 use libp2p::request_response::{self, OutboundRequestId};
@@ -14,6 +14,10 @@ use crate::message::event::NetworkEvent;
 use crate::protocol::{DirectRequest, DirectResponse};
 
 /// Mantiene el estado del bucle de red y los canales de comunicación.
+///
+/// `EventLoop` es el unico propietario del `Swarm` y el punto central donde se
+/// coordinan comandos, eventos y operaciones pendientes. Cualquier cambio de
+/// semantica observable del crate suele terminar pasando por esta estructura.
 pub struct EventLoop {
     swarm: Swarm<CustomBehaviour>,
     command_receiver: mpsc::Receiver<NetworkCommand>,
@@ -22,14 +26,27 @@ pub struct EventLoop {
 
     // Diccionarios de estado para mapear las respuestas de la red a los caller's asíncronos
     pending_rr_requests: HashMap<OutboundRequestId, oneshot::Sender<Result<(), P2pError>>>,
-    pending_kad_providers: HashMap<QueryId, oneshot::Sender<Result<Vec<PeerId>, P2pError>>>,
+    pending_kad_providers: HashMap<QueryId, PendingProvidersQuery>,
     pending_kad_routing: HashMap<QueryId, oneshot::Sender<Result<(), P2pError>>>,
     
     // Estado interno
     is_ready: bool,
 }
 
+/// Estado acumulado para una consulta `get_providers` de Kademlia.
+///
+/// Kademlia puede reportar providers de forma incremental. Esta estructura
+/// permite agregar resultados parciales y resolver la operacion una sola vez al
+/// final de la query, manteniendo sincronizados el retorno del metodo publico y
+/// el evento `NetworkEvent::ProviderFound`.
+struct PendingProvidersQuery {
+    key: String,
+    providers: HashSet<PeerId>,
+    responder: oneshot::Sender<Result<Vec<PeerId>, P2pError>>,
+}
+
 impl EventLoop {
+    /// Construye un nuevo bucle de red sobre un `Swarm` ya configurado.
     pub fn new(
         swarm: Swarm<CustomBehaviour>,
         command_receiver: mpsc::Receiver<NetworkCommand>,
@@ -124,11 +141,20 @@ impl EventLoop {
             NetworkCommand::FindProviders { key, responder } => {
                 let record_key = kad::RecordKey::new(&key);
                 let query_id = self.swarm.behaviour_mut().kademlia.get_providers(record_key);
-                self.pending_kad_providers.insert(query_id, responder);
+                self.pending_kad_providers.insert(
+                    query_id,
+                    PendingProvidersQuery {
+                        key,
+                        providers: HashSet::new(),
+                        responder,
+                    },
+                );
             }
         }
     }
 
+    /// Procesa un evento del swarm y, cuando corresponde, lo traduce a un
+    /// evento de alto nivel para la aplicacion.
     async fn handle_swarm_event(&mut self, event: SwarmEvent<CustomBehaviourEvent>) {
         match event {
             SwarmEvent::Behaviour(CustomBehaviourEvent::Kademlia(kad::Event::OutboundQueryProgressed { id, result, .. })) => {
@@ -141,15 +167,22 @@ impl EventLoop {
                     }
                     // Cuando la búsqueda encuentra a alguien
                     kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders { providers, .. })) => {
-                        if let Some(responder) = self.pending_kad_providers.remove(&id) {
-                            let _ = responder.send(Ok(providers.into_iter().collect()));
+                        if let Some(query) = self.pending_kad_providers.get_mut(&id) {
+                            query.providers.extend(providers);
                         }
                     }
                     // Cuando la búsqueda termina y no hay más registros
                     kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FinishedWithNoAdditionalRecord { .. })) => {
-                        // Si no habíamos encontrado a nadie antes, devolvemos una lista vacía
-                        if let Some(responder) = self.pending_kad_providers.remove(&id) {
-                            let _ = responder.send(Ok(vec![])); 
+                        if let Some(query) = self.pending_kad_providers.remove(&id) {
+                            self.finish_pending_provider_query(query).await;
+                        }
+                    }
+                    kad::QueryResult::GetProviders(Err(error)) => {
+                        if let Some(query) = self.pending_kad_providers.remove(&id) {
+                            let _ = query.responder.send(Err(P2pError::Io(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                error.to_string(),
+                            ))));
                         }
                     }
                     _ => {} // Ignoramos errores u otros eventos intermedios para no saturar
@@ -232,5 +265,18 @@ impl EventLoop {
             
             _ => {} // Resto de eventos (Conexiones abiertas, cerradas, Identify info, etc.)
         }
+    }
+
+    /// Cierra una query de providers emitiendo el evento publico y resolviendo
+    /// el resultado del metodo `find_providers` con el mismo conjunto final de peers.
+    async fn finish_pending_provider_query(&mut self, query: PendingProvidersQuery) {
+        let providers: Vec<PeerId> = query.providers.into_iter().collect();
+        let event = NetworkEvent::ProviderFound {
+            key: query.key,
+            providers: providers.clone(),
+        };
+
+        let _ = self.event_sender.send(event).await;
+        let _ = query.responder.send(Ok(providers));
     }
 }

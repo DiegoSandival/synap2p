@@ -9,6 +9,10 @@ use std::time::Duration;
 use crate::config::{NodeConfig, NodeRole};
 use crate::protocol::{DirectMessageCodec, DirectMessageProtocol};
 
+/// Composicion de behaviours de `libp2p` usados por `synap2p`.
+///
+/// Esta estructura define la superficie de protocolos activa del nodo. Cambios
+/// aqui suelen afectar arquitectura, eventos y a veces compatibilidad observable.
 #[derive(NetworkBehaviour)]
 pub struct CustomBehaviour {
     pub identify: identify::Behaviour,
@@ -21,6 +25,14 @@ pub struct CustomBehaviour {
 }
 
 impl CustomBehaviour {
+    /// Construye el conjunto de behaviours segun el rol y la configuracion del nodo.
+    ///
+    /// Decisiones relevantes:
+    ///
+    /// - `gossipsub` usa mensajes firmados
+    /// - `relay_server` solo se habilita para `NodeRole::RelayServer`
+    /// - `request_response` usa `DirectMessageCodec`
+    /// - `kademlia` usa `MemoryStore`, por lo que su estado no persiste
     pub fn new(local_key: &libp2p::identity::Keypair, config: &NodeConfig, relay_client: relay::client::Behaviour) -> Result<Self, Box<dyn std::error::Error>> {
         let local_peer_id = local_key.public().to_peer_id();
 

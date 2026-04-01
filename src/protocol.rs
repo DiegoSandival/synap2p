@@ -4,6 +4,7 @@ use libp2p::request_response::Codec;
 use serde::{Deserialize, Serialize};
 use std::io;
 
+/// Identificador del protocolo wire usado para mensajes directos.
 #[derive(Debug, Clone)]
 pub struct DirectMessageProtocol;
 
@@ -14,16 +15,22 @@ impl AsRef<str> for DirectMessageProtocol {
     }
 }
 
+/// Request enviada por el protocolo de mensaje directo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectRequest {
     pub payload: Vec<u8>,
 }
 
+/// Response devuelta por el protocolo de mensaje directo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectResponse {
     pub status: String,
 }
 
+/// Codec del protocolo de mensajes directos.
+///
+/// Usa un framing simple con longitud prefijada de 4 bytes big-endian seguido
+/// por un payload JSON. Requests y responses se limitan a 1 MiB.
 #[derive(Clone, Default)]
 pub struct DirectMessageCodec;
 
@@ -114,5 +121,88 @@ impl Codec for DirectMessageCodec {
         io.write_all(&data).await?;
         io.flush().await?;
         io.close().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DirectMessageCodec, DirectMessageProtocol, DirectRequest, DirectResponse};
+    use futures::executor::block_on;
+    use futures::io::AllowStdIo;
+    use libp2p::request_response::Codec;
+    use std::io::Cursor;
+
+    #[test]
+    fn roundtrip_request_codec() {
+        block_on(async {
+            let mut writer = AllowStdIo::new(Cursor::new(Vec::new()));
+            let mut codec = DirectMessageCodec;
+
+            codec
+                .write_request(
+                    &DirectMessageProtocol,
+                    &mut writer,
+                    DirectRequest {
+                        payload: b"hola".to_vec(),
+                    },
+                )
+                .await
+                .expect("write_request should succeed");
+
+            let encoded = writer.into_inner().into_inner();
+            let mut reader = AllowStdIo::new(Cursor::new(encoded));
+            let decoded = codec
+                .read_request(&DirectMessageProtocol, &mut reader)
+                .await
+                .expect("read_request should succeed");
+
+            assert_eq!(decoded.payload, b"hola".to_vec());
+        });
+    }
+
+    #[test]
+    fn roundtrip_response_codec() {
+        block_on(async {
+            let mut writer = AllowStdIo::new(Cursor::new(Vec::new()));
+            let mut codec = DirectMessageCodec;
+
+            codec
+                .write_response(
+                    &DirectMessageProtocol,
+                    &mut writer,
+                    DirectResponse {
+                        status: "OK".to_string(),
+                    },
+                )
+                .await
+                .expect("write_response should succeed");
+
+            let encoded = writer.into_inner().into_inner();
+            let mut reader = AllowStdIo::new(Cursor::new(encoded));
+            let decoded = codec
+                .read_response(&DirectMessageProtocol, &mut reader)
+                .await
+                .expect("read_response should succeed");
+
+            assert_eq!(decoded.status, "OK");
+        });
+    }
+
+    #[test]
+    fn rejects_oversized_request_payload() {
+        block_on(async {
+            let oversized_len = 1024_u32 * 1024 + 1;
+            let mut bytes = oversized_len.to_be_bytes().to_vec();
+            bytes.extend(std::iter::repeat_n(0u8, 8));
+
+            let mut reader = AllowStdIo::new(Cursor::new(bytes));
+            let mut codec = DirectMessageCodec;
+            let error = codec
+                .read_request(&DirectMessageProtocol, &mut reader)
+                .await
+                .expect_err("oversized payload should be rejected");
+
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        });
     }
 }

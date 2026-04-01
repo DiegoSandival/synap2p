@@ -196,6 +196,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let text = String::from_utf8_lossy(&data);
                 println!("📩 [MD de {}]: {}", source, text);
             }
+            NetworkEvent::ProviderFound { key, providers } => {
+                if providers.is_empty() {
+                    println!("🧭 [DHT] La búsqueda de '{}' terminó sin proveedores.", key);
+                } else {
+                    println!("🧭 [DHT] Proveedores finales para '{}':", key);
+                    for provider in providers {
+                        println!("   - {}", provider);
+                    }
+                }
+            }
             NetworkEvent::Ready { .. } => {}
             NetworkEvent::NewListenAddr(_) => {}
             NetworkEvent::FatalError(e) => {
@@ -209,7 +219,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             NetworkEvent::ConnectionFailed { peer_id, error } => {
                 eprintln!("❌ Falló la conexión con {}: {}", peer_id, error);
             }
-            _ => {} 
         }
     }
 

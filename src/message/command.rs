@@ -3,6 +3,10 @@ use tokio::sync::oneshot;
 use crate::error::P2pError;
 
 /// Comandos enviados desde la API pública (NodeClient) hacia el Event Loop del Swarm.
+///
+/// Cada variante representa una peticion de alto nivel hecha por la aplicacion.
+/// El `EventLoop` es responsable de traducir estos comandos a operaciones sobre
+/// `libp2p` y de resolver sus respuestas cuando corresponda.
 #[derive(Debug)]
 pub enum NetworkCommand {
     Connect {
